@@ -1,0 +1,15 @@
+# Environments
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# Data and Artifacts
+data/
+results/
+logs/
+models/
+
+# OS generated files
+.DS_Store
+Thumbs.db
