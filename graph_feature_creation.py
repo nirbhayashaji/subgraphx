@@ -4,12 +4,11 @@ import pandas as pd
 import networkx as nx
 from pathlib import Path
 
-def create_graph_features(G: nx.Graph | nx.DiGraph, sme_nodes, output_filepath: Path | str, log_filepath: Path | str = "results/analysis.log"):
+def create_graph_features(G: nx.Graph | nx.DiGraph, target_nodes, output_filepath: Path | str, log_filepath: Path | str = "results/analysis.log"):
     """
     Calculates node-level network metrics from the graph and exports them to a CSV.
     Logs graph information to both the console and a specified log file.
     """
-    # --- LOGGING SETUP ---
     log_path = Path(log_filepath)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     
@@ -26,7 +25,6 @@ def create_graph_features(G: nx.Graph | nx.DiGraph, sme_nodes, output_filepath: 
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
 
-    # --- GRAPH INFORMATION ---
     logger.info("Performing detailed network analysis...")
     logger.info("Graph Information:")
     logger.info(G)
@@ -77,18 +75,18 @@ def create_graph_features(G: nx.Graph | nx.DiGraph, sme_nodes, output_filepath: 
         logger.info(f"- Average Degree: {avg_degree:.2f}")
         logger.info(f"- Maximum Degree: {max(degrees)}")
         
-    missing_smes = [node for node in sme_nodes if node not in G.nodes()]
-    if missing_smes:
-        logger.warning(f"- WARNING: These SME nodes are missing from the graph: {missing_smes}")
+    missing_targets = [node for node in target_nodes if node not in G.nodes()]
+    if missing_targets:
+        logger.warning(f"- WARNING: These target nodes are missing from the graph: {missing_targets}")
     else:
-        logger.info("- All SME target nodes are present in the graph.")
+        logger.info("- All target nodes are present in the graph.")
     
     # --- 1. BASIC DEGREE CALCULATION ---
     t_start_degree = time.perf_counter()
     analysis_data = []
     
     for node in G.nodes():
-        node_info = {'Node_NIF': node}
+        node_info = {'Node_ID': node}
         
         if isinstance(G, nx.DiGraph):
             node_info['In_Degree'] = G.in_degree(node)
@@ -104,9 +102,6 @@ def create_graph_features(G: nx.Graph | nx.DiGraph, sme_nodes, output_filepath: 
     
     # --- 2. ADVANCED METRICS CALCULATION ---
     logger.info("Calculating advanced network centralities and structural metrics...")
-    
-    # Define a sampling size for massive graphs
-    # If graph is small, calculate exact. If large, approximate with 1000 nodes.
     sample_size = None if num_nodes < 5000 else 1000
     
     try:
@@ -114,31 +109,28 @@ def create_graph_features(G: nx.Graph | nx.DiGraph, sme_nodes, output_filepath: 
         if sample_size:
             logger.info(f"Graph is very large. Using k={sample_size} approximation for Betweenness...")
         
-        # FIX 1: Add the `k` parameter to approximate betweenness
-        df_analysis['Betweenness'] = df_analysis['Node_NIF'].map(
+        df_analysis['Betweenness'] = df_analysis['Node_ID'].map(
             nx.betweenness_centrality(G, k=sample_size, seed=42)
         )
         logger.info(f"[Timing] Betweenness calculated in {time.perf_counter() - t0:.4f}s")
         
-        # FIX 2: Closeness Centrality scales horribly and has no 'k' approximation.
-        # If the graph is huge, we must skip it.
         t0 = time.perf_counter()
         if num_nodes < 5000:
-            df_analysis['Closeness'] = df_analysis['Node_NIF'].map(nx.closeness_centrality(G))
+            df_analysis['Closeness'] = df_analysis['Node_ID'].map(nx.closeness_centrality(G))
             logger.info(f"[Timing] Closeness calculated in {time.perf_counter() - t0:.4f}s")
         else:
             logger.warning(f"Skipping Closeness Centrality: Graph is too large ({num_nodes} nodes).")
-            df_analysis['Closeness'] = 0 # Default to 0 to keep dataframe structure intact
+            df_analysis['Closeness'] = 0 
         
         t0 = time.perf_counter()
         clustering_dict: dict = nx.clustering(G)  # type: ignore
-        df_analysis['Clustering_Coeff'] = df_analysis['Node_NIF'].map(clustering_dict)
+        df_analysis['Clustering_Coeff'] = df_analysis['Node_ID'].map(clustering_dict)
         logger.info(f"[Timing] Clustering Coeff calculated in {time.perf_counter() - t0:.4f}s")
         
         t0 = time.perf_counter()
         G_un = G.to_undirected() if G.is_directed() else G
         triangles_dict: dict = nx.triangles(G_un)  # type: ignore
-        df_analysis['Triangles'] = df_analysis['Node_NIF'].map(triangles_dict)
+        df_analysis['Triangles'] = df_analysis['Node_ID'].map(triangles_dict)
         logger.info(f"[Timing] Triangles calculated in {time.perf_counter() - t0:.4f}s")
         
     except Exception as e:
