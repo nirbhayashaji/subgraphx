@@ -57,12 +57,30 @@ To solve this, the pipeline applies a **Rank Transformation**:
 * **Python:** v3.10 or higher
 * **Memory:** 8GB+ RAM recommended for graphs exceeding 150,000 nodes.
 
-###Installation
+I see exactly what happened! Looking at your screenshot, the flowchart code accidentally got swallowed up by the bash code block right above it.
+
+Because the bash block was never closed, GitHub thinks the entire flowchart is just a really long, weird terminal command instead of a diagram.
+
+To fix this, you just need to make sure the bash block is closed with three backticks (```) before you start the ```mermaid block. Also, inside bash blocks, you don't need the markdown link brackets for the git URL.
+
+Here is the exact corrected markdown for that section. You can copy and paste this to replace the bottom of your README.md:
+Markdown
+
+### Installation
 
 **1. Clone the repository:**
 ```bash
 git clone [https://github.com/YOUR-USERNAME/subgraphx.git](https://github.com/YOUR-USERNAME/subgraphx.git)
 cd subgraphx
+```
+
+## Pipeline Architecture###Installation
+
+**1. Clone the repository:**
+```bash
+git clone [https://github.com/YOUR-USERNAME/subgraphx.git](https://github.com/YOUR-USERNAME/subgraphx.git)
+cd subgraphx
+
 
 graph TD
     %% Styling
