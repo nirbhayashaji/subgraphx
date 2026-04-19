@@ -63,3 +63,79 @@ To solve this, the pipeline applies a **Rank Transformation**:
 ```bash
 git clone [https://github.com/YOUR-USERNAME/subgraphx.git](https://github.com/YOUR-USERNAME/subgraphx.git)
 cd subgraphx
+
+graph TD
+    %% Styling
+    classDef data fill:#f9f6f0,stroke:#333,stroke-width:1px,color:#333
+    classDef script fill:#e1f5fe,stroke:#0277bd,stroke-width:2px,color:#000
+    classDef model fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#000
+    classDef output fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#000
+
+    %% Inputs
+    RawData[Raw Transactions CSV]:::data
+
+    %% Phase 1: Feature Engineering
+    subgraph Phase 1: Feature Engineering & Graph Construction
+        MainOrchestrator(main.py):::script
+        Proc[processing.py<br>Clean & Map Data]:::script
+        NetLog[network_logic.py<br>Build Directed Graph]:::script
+        StructFeat[graph_feature_creation.py<br>Calculate Centralities]:::script
+        DomFeat[transfer_feature_creation.py<br>Calculate Imbalances]:::script
+        
+        RawData --> MainOrchestrator
+        MainOrchestrator --> Proc
+        Proc --> NetLog
+        NetLog --> StructFeat
+        NetLog --> DomFeat
+        StructFeat --> MasterCSV
+        DomFeat --> MasterCSV
+    end
+
+    MasterCSV[results/master_node_features.csv]:::data
+
+    %% Phase 2A: Deep Learning
+    subgraph Phase 2A: Deep Learning Model
+        TrainAE(train_ae.py):::script
+        ModelArch[model_ae.py<br>PyTorch Autoencoder]:::model
+        
+        MasterCSV --> TrainAE
+        ModelArch -.-> TrainAE
+        TrainAE --> PthWeights[models/anomaly_ae_model.pth]:::data
+        TrainAE --> Scaler[models/scaler.joblib]:::data
+    end
+
+    %% Phase 2B: Ensemble Detection
+    subgraph Phase 2B: Anomaly Ensemble
+        AnomalyEng(anomaly_engine.py):::script
+        IsoForest[Isolation Forest]:::model
+        LOF[Local Outlier Factor]:::model
+        KMeans[K-Means Clustering]:::model
+        Borda[Borda Count Rank Aggregation]:::script
+        
+        MasterCSV --> AnomalyEng
+        AnomalyEng --> IsoForest
+        AnomalyEng --> LOF
+        AnomalyEng --> KMeans
+        AnomalyEng --> ModelArch
+        
+        IsoForest --> Borda
+        LOF --> Borda
+        KMeans --> Borda
+        ModelArch --> Borda
+        
+        Borda --> EnsembleCSV[results/anomaly_ensemble_results.csv]:::data
+    end
+
+    %% Phase 3: Explainability
+    subgraph Phase 3: XAI & Visualization
+        Explainer(explainer_logic.py):::script
+        Shapley[Game Theory Shapley Values<br>Marginal Contribution]:::script
+        
+        EnsembleCSV -- "Provides Top Suspect ID" --> Explainer
+        MasterCSV --> Explainer
+        PthWeights --> Explainer
+        Scaler --> Explainer
+        
+        Explainer --> Shapley
+        Shapley --> OutputPlot([results/plots/subgraphx_shapley.png]):::output
+    end
