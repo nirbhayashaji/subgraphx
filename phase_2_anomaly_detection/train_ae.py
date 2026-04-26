@@ -1,72 +1,90 @@
+import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
 import pandas as pd
 import joblib
 from sklearn.preprocessing import MinMaxScaler
 from pathlib import Path
 
-# Import unified architecture
-from model_ae import AnomalyAE
+# Add parent directory to path so we can import Phase 1 tools
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from processing import load_and_clean_data
+from network_logic import build_transfer_network
 
-def train_model():
-    print("Initializing PyTorch Autoencoder training...")
-    
+# Import the new GNN architecture
+from phase_2_anomaly_detection.model_ae import AnomalyGAE
+
+def train_gnn_model():
+    print("Initializing PyTorch Geometric (GNN) training...")
+
     # Setup paths
     BASE_DIR = Path(__file__).resolve().parent.parent
     INPUT_CSV = BASE_DIR / "results" / "master_node_features.csv"
+    RAW_DATA_CSV = BASE_DIR / "data" / "raw_network_transactions.csv"
     
     MODELS_DIR = BASE_DIR / "models"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_PATH = MODELS_DIR / "anomaly_ae_model.pth"
     SCALER_PATH = MODELS_DIR / "scaler.joblib"
 
-    # Load and prepare data
+    # --- 1. LOAD FEATURES ---
     print("Loading master feature dataset...")
-    df = pd.read_csv(INPUT_CSV, low_memory=False)
+    df_features = pd.read_csv(INPUT_CSV, dtype={'Node_ID': str}, low_memory=False)
     
-    # Drop ID column to isolate numerical features
-    features_df = df.drop(columns=['Node_ID']).fillna(0)
-    input_dim = features_df.shape[1]
-    print(f"Detected {input_dim} features for training.")
+    # CRITICAL GNN STEP: PyTorch Geometric requires nodes to be indexed from 0 to N-1.
+    # We create a dictionary mapping your string Node_IDs to strict integers.
+    node_to_idx = {node_id: idx for idx, node_id in enumerate(df_features['Node_ID'])}
+    
+    features_only = df_features.drop(columns=['Node_ID']).fillna(0)
+    input_dim = features_only.shape[1]
 
     print("Scaling data...")
     scaler = MinMaxScaler()
-    X_scaled = scaler.fit_transform(features_df)
-    
-    # Save the scaler for the explainer script
+    X_scaled = scaler.fit_transform(features_only)
     joblib.dump(scaler, SCALER_PATH)
     
-    # Convert to PyTorch Tensors
-    X_tensor = torch.FloatTensor(X_scaled)
-    dataset = TensorDataset(X_tensor, X_tensor) 
-    dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
+    x_tensor = torch.FloatTensor(X_scaled)
 
-    # Initialize model & training parameters
-    model = AnomalyAE(input_dim=input_dim)
+    # --- 2. EXTRACT GRAPH EDGES ---
+    print("Loading raw transactions to extract network edges...")
+    df_raw = load_and_clean_data(str(RAW_DATA_CSV))
+    G = build_transfer_network(df_raw)
+    
+    print("Mapping edges to PyTorch Geometric format...")
+    source_indices = []
+    target_indices = []
+    
+    for u, v in G.edges():
+        if str(u) in node_to_idx and str(v) in node_to_idx:
+            source_indices.append(node_to_idx[str(u)])
+            target_indices.append(node_to_idx[str(v)])
+            
+    edge_index = torch.tensor([source_indices, target_indices], dtype=torch.long)
+    print(f"Graph constructed with {x_tensor.size(0)} nodes and {edge_index.size(1)} edges.")
+
+    # --- 3. INITIALIZE MODEL & TRAINING ---
+    model = AnomalyGAE(input_dim=input_dim)
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.005)
 
-    epochs = 50
-    print(f"Starting training loop for {epochs} epochs...")
+    # Full-batch training for GNNs usually needs a few more epochs
+    epochs = 100 
+    print(f"Starting full-batch training loop for {epochs} epochs...")
     
     model.train()
     for epoch in range(epochs):
-        epoch_loss = 0
-        for batch_features, _ in dataloader:
-            optimizer.zero_grad()
-            
-            outputs = model(batch_features)
-            loss = criterion(outputs, batch_features)
-            
-            loss.backward()
-            optimizer.step()
-            
-            epoch_loss += loss.item()
-            
+        optimizer.zero_grad()
+        
+        # Forward pass now takes BOTH features and edges!
+        outputs = model(x_tensor, edge_index)
+        loss = criterion(outputs, x_tensor)
+        
+        loss.backward()
+        optimizer.step()
+        
         if (epoch + 1) % 10 == 0:
-            print(f"Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss/len(dataloader):.6f}")
+            print(f"Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.6f}")
 
     # Save outputs
     torch.save(model.state_dict(), MODEL_PATH)
@@ -75,4 +93,4 @@ def train_model():
     print(f"Model weights saved to: {MODEL_PATH}")
 
 if __name__ == "__main__":
-    train_model()
+    train_gnn_model()

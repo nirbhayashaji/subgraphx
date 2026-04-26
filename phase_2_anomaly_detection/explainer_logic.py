@@ -5,7 +5,6 @@ import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-import matplotlib.colors as mcolors
 from pathlib import Path
 
 # Add the parent directory to the path to import Phase 1 scripts
@@ -13,13 +12,16 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from processing import load_and_clean_data
 from network_logic import build_transfer_network
 
-from phase_2_anomaly_detection.model_ae import AnomalyAE 
+# Import the new GNN Architecture
+from phase_2_anomaly_detection.model_ae import AnomalyGAE 
 
-def calculate_marginal_contribution(model, scaler, metrics_df, features, G, target_node):
+def calculate_marginal_contribution(model, scaler, metrics_df, features, G, target_node, edge_index):
     """
     Applies Shapley value logic to find which neighbors contribute most to the target's anomaly score.
+    Now utilizes GNN Message Passing!
     """
     model.eval()
+    
     # Get the local neighborhood (Catching both INCOMING and OUTGOING partners)
     ego_graph = nx.ego_graph(G, target_node, radius=1, undirected=True)
     neighbors = list(ego_graph.nodes())
@@ -30,7 +32,8 @@ def calculate_marginal_contribution(model, scaler, metrics_df, features, G, targ
         data = df_state[features].fillna(0)
         X = torch.FloatTensor(scaler.transform(data))
         with torch.no_grad():
-            reconstructed = model(X)
+            # GNN FORWARD PASS: Now requires both features and network structure (edge_index)
+            reconstructed = model(X, edge_index)
             errors = torch.mean((X - reconstructed)**2, dim=1)
             
         target_idx = df_state.index.get_loc(df_state[df_state['Node_ID'] == target_node].index[0])
@@ -65,7 +68,7 @@ def calculate_marginal_contribution(model, scaler, metrics_df, features, G, targ
 
 def explain_and_visualize(target_node: str):
     target_node = str(target_node)
-    print(f"Initializing Shapley investigation on Node {target_node}...")
+    print(f"Initializing GNN Shapley investigation on Node {target_node}...")
 
     # Setup paths
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -87,16 +90,27 @@ def explain_and_visualize(target_node: str):
 
     features = [col for col in metrics_df.columns if col != 'Node_ID']
 
+    # --- BUILD THE EDGE INDEX FOR THE GNN ---
+    print("Constructing edge index for GNN message passing...")
+    node_to_idx = {node_id: idx for idx, node_id in enumerate(metrics_df['Node_ID'])}
+    source_indices = []
+    target_indices = []
+    for u, v in G.edges():
+        if str(u) in node_to_idx and str(v) in node_to_idx:
+            source_indices.append(node_to_idx[str(u)])
+            target_indices.append(node_to_idx[str(v)])
+    edge_index = torch.tensor([source_indices, target_indices], dtype=torch.long)
+
     scaler = joblib.load(SCALER_PATH)
 
-    # Load PyTorch Model
-    model = AnomalyAE(input_dim=len(features))
+    # Load PyTorch Geometric Model
+    model = AnomalyGAE(input_dim=len(features))
     model.load_state_dict(torch.load(MODEL_PATH))
     model.eval() 
 
-    print("Calculating marginal contributions (Shapley Values)...")
+    print("Calculating marginal contributions (Shapley Values) via Message Passing...")
     influential_nodes, base_score = calculate_marginal_contribution(
-        model, scaler, metrics_df, features, G, target_node
+        model, scaler, metrics_df, features, G, target_node, edge_index
     )
     
     print(f"Target Base Score: {base_score:.4f}")
@@ -130,7 +144,7 @@ def explain_and_visualize(target_node: str):
     labels = {n: f"{n}\n(Shapley: {influential_nodes.get(n, 0):.4f})" if n != target_node else f"TARGET\n{n}" for n in crime_scene.nodes()}
     nx.draw_networkx_labels(crime_scene, pos, labels=labels, font_size=8, font_weight="bold")
 
-    plt.title(f"Explainability: Node {target_node}\n(Marginal Contribution to Anomaly Score)", fontsize=16, fontweight='bold')
+    plt.title(f"GNN Explainability: Node {target_node}\n(Marginal Contribution to Anomaly Score)", fontsize=16, fontweight='bold')
     plt.axis('off')
 
     plot_path = PLOT_DIR / f"subgraphx_shapley_{target_node}.png"
@@ -140,5 +154,41 @@ def explain_and_visualize(target_node: str):
     print(f"Investigation complete. Visual evidence saved to: {plot_path}")
 
 if __name__ == "__main__":
-    SUSPECT_NODE = "500512884" 
-    explain_and_visualize(SUSPECT_NODE)
+    print("\n=======================================================")
+    print("      SUBGRAPHX EXPLAINABILITY MODULE (PHASE 3)      ")
+    print("=======================================================")
+    print("What would you like to investigate?")
+    print("  [1] The Top 3 Mathematical Anomalies (AI Consensus)")
+    print("  [2] The 3 Specific Business Suspect Nodes")
+    print("=======================================================")
+    
+    choice = input("Enter 1 or 2: ").strip()
+    
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    
+    nodes_to_explain = []
+    
+    if choice == '1':
+        # Automatically pull the Top 3 from the anomaly rankings
+        results_csv = BASE_DIR / "results" / "anomaly_ensemble_results.csv"
+        try:
+            df_results = pd.read_csv(results_csv)
+            nodes_to_explain = df_results['Node_ID'].head(3).astype(str).tolist()
+            print(f"\nPulling Top 3 anomalies from ranking: {nodes_to_explain}")
+        except FileNotFoundError:
+            print("Error: anomaly_ensemble_results.csv not found. Run main.py first.")
+            sys.exit()
+            
+    elif choice == '2':
+        # Use the hardcoded business suspects
+        nodes_to_explain = ["513902872", "509903851", "516096826"]
+        print(f"\nQueueing specific business suspects: {nodes_to_explain}")
+        
+    else:
+        print("Invalid choice. Exiting.")
+        sys.exit()
+
+    # Loop through the chosen list and generate the GNN Shapley evidence maps!
+    for node in nodes_to_explain:
+        print(f"\n-------------------------------------------------------")
+        explain_and_visualize(node)
