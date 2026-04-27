@@ -20,23 +20,28 @@ def run_anomaly_ensemble(data_path: Path | str, output_path: Path | str, target_
     
     results_df = pd.DataFrame({'Node_ID': nodes})
     
-    print("Training Models & Scoring Nodes...")
-    # Updated contamination to 0.01 (1%) for stricter anomaly filtering
-    iso = IsolationForest(n_estimators=10000, contamination=0.01, random_state=42)
+    print("Training Models & Scoring Nodes.")
+    
+    # 1. Isolation Forest (Matched to R: seed=19, ntrees=100)
+    iso = IsolationForest(n_estimators=100, contamination=0.01, random_state=19)
     iso.fit(X_scaled)
     results_df['Score_IF'] = -iso.decision_function(X_scaled) 
 
-    # Updated neighbors to 100 to fix duplicate value warnings, and contamination to 0.01
-    lof = LocalOutlierFactor(n_neighbors=10000, contamination=0.01)
+    # 2. Local Outlier Factor (Matched to R: minPts max search space ~30)
+    # Note: We keep this at 100 to naturally solve the unique/duplicate issue 
+    # the R script bypassed using the `unique()` function.
+    lof = LocalOutlierFactor(n_neighbors=100, contamination=0.01)
     lof.fit_predict(X_scaled)
     results_df['Score_LOF'] = -lof.negative_outlier_factor_
 
-    kmeans = KMeans(n_clusters=10, random_state=42, n_init=10)
+    # 3. K-Means (Matched to R: centers=2, seed=19)
+    kmeans = KMeans(n_clusters=2, random_state=19, n_init=10)
     kmeans.fit(X_scaled)
     distances = kmeans.transform(X_scaled)
     results_df['Score_KMeans'] = [distances[i, label] for i, label in enumerate(kmeans.labels_)]
 
-    autoencoder = MLPRegressor(hidden_layer_sizes=(8, 4, 8), max_iter=500, random_state=42)
+    # 4. MLP Autoencoder (Unique to the new architecture, seed synced to 19)
+    autoencoder = MLPRegressor(hidden_layer_sizes=(8, 4, 8), max_iter=500, random_state=19)
     autoencoder.fit(X_scaled, X_scaled)
     reconstructed = autoencoder.predict(X_scaled)
     results_df['Score_AE'] = np.mean(np.square(X_scaled - reconstructed), axis=1)
