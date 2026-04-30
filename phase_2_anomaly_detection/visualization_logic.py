@@ -1,146 +1,121 @@
 import math
 import networkx as nx
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib.lines import Line2D
 from pathlib import Path
 
 def draw_shapley_evidence_map(target_node: str, crime_scene: nx.Graph, influential_nodes: dict, plot_dir: Path):
-    """
-    Final Refined Evidence Map for Waste Management Networks:
-    - Blue = Incoming (Suppliers)
-    - Green = Outgoing (Destinations)
-    - Orange = Peer-to-Peer (Internal backchannels arching outward to expose collusion)
-    - Radius-based spacing for high-density neighborhoods (100+ suppliers)
-    """
-    print(f"Drawing the color-coded evidence map for {target_node}...")
-    plt.figure(figsize=(18, 14))
+    """Generates the 2-panel Executive Dashboard for a single node investigation."""
+    print(f"Generating the Executive Evidence Dashboard for {target_node}...")
+    
+    fig = plt.figure(figsize=(22, 12))
+    gs = fig.add_gridspec(1, 2, width_ratios=[2.5, 1])
+    ax_graph = fig.add_subplot(gs[0])
+    ax_bar = fig.add_subplot(gs[1])
 
-    # Create a copy for display to safely remove self-loops for visual clarity
     display_graph = nx.DiGraph(crime_scene)
     display_graph.remove_edges_from(nx.selfloop_edges(display_graph))
 
-    # ==========================================
-    # 1. LAYOUT: INCREASED RADIUS FOR SPACING
-    # ==========================================
     pos = {target_node: (0.0, 0.0)}
+    incoming = [n for n in display_graph.nodes() if n != target_node and display_graph.has_edge(n, target_node)]
+    outgoing = [n for n in display_graph.nodes() if n != target_node and display_graph.has_edge(target_node, n) and n not in incoming]
 
-    incoming_nodes = [n for n in display_graph.nodes() if n != target_node and display_graph.has_edge(n, target_node)]
-    outgoing_nodes = [n for n in display_graph.nodes() if n != target_node and display_graph.has_edge(target_node, n) and n not in incoming_nodes]
+    max_shap = max(list(influential_nodes.values()) + [1e-9])
+    total_shap = sum(influential_nodes.values()) if influential_nodes else 1e-9
 
-    max_shap_val = max(list(influential_nodes.values()) + [1e-9]) if influential_nodes else 1e-9
-    total_shap_val = sum(influential_nodes.values()) if influential_nodes else 1e-9
-
-    def assign_fan_positions(node_list, is_incoming):
+    def assign_fan(node_list, is_in):
         if not node_list: return
         node_list.sort(key=lambda x: influential_nodes.get(x, 0), reverse=True)
-        n_nodes = len(node_list)
-        
-        # Determine which side of the target node they sit on (Incoming=Left, Outgoing=Right)
-        start_angle, end_angle = (math.pi/2, 3*math.pi/2) if is_incoming else (-math.pi/2, math.pi/2)
-
+        start, end = (math.pi/2, 3*math.pi/2) if is_in else (-math.pi/2, math.pi/2)
         for i, n in enumerate(node_list):
-            norm_shap = influential_nodes.get(n, 0) / max_shap_val
-            # INCREASED SPACING: Radius ranges from 1.5 to 3.5 to prevent label overlap
-            r = 3.5 - (norm_shap * 2.0)
-
-            if n_nodes == 1:
-                theta = (start_angle + end_angle) / 2
-            else:
-                pad = 0.2 
-                theta = (start_angle + pad) + (end_angle - start_angle - 2*pad) * (i / (n_nodes - 1))
+            r = 3.5 - ((influential_nodes.get(n, 0) / max_shap) * 2.0)
+            theta = start + (end - start) * (i / (len(node_list)-1 if len(node_list)>1 else 1))
             pos[n] = (r * math.cos(theta), r * math.sin(theta))
 
-    assign_fan_positions(incoming_nodes, is_incoming=True)
-    assign_fan_positions(outgoing_nodes, is_incoming=False)
-
-    # ==========================================
-    # 2. EDGE LOGIC: DIRECTIONAL COLORS & OUTWARD ARCHING
-    # ==========================================
-    # Calculate node sizes list in advance for edge padding fix
-    node_sizes_list = [2500 if n == target_node else (influential_nodes.get(n, 0) / max_shap_val) * 1200 + 200 for n in display_graph.nodes()]
+    assign_fan(incoming, True)
+    assign_fan(outgoing, False)
 
     for u, v in display_graph.edges():
-        # 1. Incoming (Supplier -> Target)
-        if v == target_node:
-            ecolor = '#1f77b4' # Steel Blue
-            curve_rad = 0.1    # Subtle curve inward
-            weight_node = u
-            
-        # 2. Outgoing (Target -> Destination)
-        elif u == target_node:
-            ecolor = '#2ca02c' # Forest Green
-            curve_rad = 0.1    # Subtle curve inward
-            weight_node = v
-            
-        # 3. INTERNAL PEER-TO-PEER (Neighbor -> Neighbor)
-        else:
-            ecolor = '#ff7f0e' # Safety Orange
-            # ARCH OUTWARD: Pushes collusion paths outside the main business flow
-            curve_rad = 0.45    
-            weight_node = u 
+        ecolor = '#1f77b4' if v == target_node else ('#2ca02c' if u == target_node else '#ff7f0e')
+        impact = influential_nodes.get(u if v == target_node else v, 0) / max_shap
+        nx.draw_networkx_edges(display_graph, pos, edgelist=[(u,v)], edge_color=ecolor, 
+                               width=1+(3*impact), alpha=0.3+(0.5*impact), ax=ax_graph, 
+                               arrowsize=20, connectionstyle="arc3,rad=0.1")
 
-        # Visual weight (thickness/alpha) based on relative Shapley contribution
-        impact = influential_nodes.get(weight_node, 0) / max_shap_val
-        alpha = 0.3 + (0.5 * impact)
-        width = 1.0 + (3.5 * impact)
-
-        nx.draw_networkx_edges(
-            display_graph, pos, 
-            edgelist=[(u, v)], 
-            arrowstyle='-|>', 
-            arrowsize=20 + (10 * impact),
-            edge_color=ecolor,
-            width=width, 
-            alpha=alpha, 
-            connectionstyle=f"arc3,rad={curve_rad}",
-            node_size=node_sizes_list # Ensures arrowheads are visible outside the circles
-        )
-
-    # ==========================================
-    # 3. NODE & LABEL STYLING
-    # ==========================================
-    # Target Node (Red)
-    nx.draw_networkx_nodes(display_graph, pos, nodelist=[target_node], node_color='#d62728', node_size=2500, edgecolors='black', linewidths=2)
-
-    # Accomplice Nodes (Heatmap)
+    nx.draw_networkx_nodes(display_graph, pos, nodelist=[target_node], node_color='#d62728', node_size=2500, ax=ax_graph)
     if influential_nodes:
         p_nodes = [n for n in display_graph.nodes() if n != target_node]
-        p_sizes = [s for n, s in zip(display_graph.nodes(), node_sizes_list) if n != target_node]
-        p_colors = [cm.get_cmap('YlOrRd')(influential_nodes.get(n, 0) / max_shap_val) for n in p_nodes]
-        nx.draw_networkx_nodes(display_graph, pos, nodelist=p_nodes, node_color=p_colors, node_size=p_sizes, edgecolors='#555555', linewidths=1)
+        p_colors = [cm.get_cmap('YlOrRd')(influential_nodes.get(n, 0) / max_shap) for n in p_nodes]
+        nx.draw_networkx_nodes(display_graph, pos, nodelist=p_nodes, node_color=p_colors, node_size=800, ax=ax_graph)
 
-    # Labels with Smart Decluttering (showing Impact %)
-    labels = {}
-    for n in display_graph.nodes():
-        if n == target_node:
-            labels[n] = f"TARGET\n{n}"
-        else:
-            impact_pct = (influential_nodes.get(n, 0) / total_shap_val) * 100
-            # Only label if impact > 0.5% to maintain visual quality
-            if impact_pct > 0.5:
-                labels[n] = f"{n}\n({impact_pct:.1f}%)"
-            else:
-                labels[n] = ""
+    labels = {n: f"TARGET\n{n}" if n == target_node else (f"{n}\n({(influential_nodes.get(n, 0)/total_shap)*100:.1f}%)" if (influential_nodes.get(n, 0)/total_shap) > 0.05 else "") for n in display_graph.nodes()}
+    nx.draw_networkx_labels(display_graph, pos, labels=labels, font_size=8, ax=ax_graph)
+    
+    sorted_acc = sorted(influential_nodes.items(), key=lambda x: x[1], reverse=True)
+    top_acc = f"{sorted_acc[0][0]} ({(sorted_acc[0][1]/total_shap)*100:.1f}%)" if sorted_acc else "N/A"
+    insight = f"INVESTIGATION SUMMARY\nTarget: {target_node}\nStructure: {len(incoming)} In | {len(outgoing)} Out\nTop Accomplice: {top_acc}"
+    ax_graph.text(0.02, 0.02, insight, transform=ax_graph.transAxes, bbox=dict(facecolor='white', alpha=0.9), family='monospace')
+    ax_graph.set_title(f"GNN SubgraphX Evidence: {target_node}", fontsize=15, fontweight='bold')
+    ax_graph.axis('off')
 
-    nx.draw_networkx_labels(
-        display_graph, pos, labels=labels, font_size=8, font_weight="bold", 
-        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, pad=0.5)
-    )
+    if influential_nodes:
+        names = [str(x[0]) for x in sorted_acc][:15]
+        pcts = [(x[1]/total_shap)*100 for x in sorted_acc][:15]
+        ax_bar.barh(names[::-1], pcts[::-1], color='#ff4d4d')
+        ax_bar.set_title("Accomplice Impact %")
+        ax_bar.set_xlabel("Contribution to Anomaly Score")
 
-    # Business Flow Legend
-    legend_elements = [
-        Line2D([0], [0], color='#1f77b4', lw=3, label='Incoming Flow (Suppliers)'),
-        Line2D([0], [0], color='#2ca02c', lw=3, label='Outgoing Flow (Destinations)'),
-        Line2D([0], [0], color='#ff7f0e', lw=3, label='Internal Path (Collusion Bridge)')
-    ]
-    plt.legend(handles=legend_elements, loc='upper right', title="Transaction Flow Legend")
-
-    plt.title(f"GNN SubgraphX Evidence: Node {target_node}\nStructural Anomaly Explanation", fontsize=18, fontweight='bold', pad=25)
-    plt.axis('off')
-
-    # Save finalized plot
-    plot_path = plot_dir / f"subgraphx_shapley_{target_node}.png"
-    plt.savefig(plot_path, bbox_inches='tight', dpi=300, facecolor='white')
+    plt.tight_layout()
+    plt.savefig(plot_dir / f"subgraphx_dashboard_{target_node}.png", dpi=300)
     plt.close()
-    print(f"Investigation complete. Visual evidence saved to: {plot_path}")
+
+def draw_business_suspect_comparison(suspect_nodes: list, df_results: pd.DataFrame, plot_dir: Path):
+    """Generates a Radar Chart comparing suspects based on their Model Rankings."""
+    print("Generating Business Suspect Model Ranking Radar...")
+    
+    rank_metrics = ['Rank_IF', 'Rank_LOF', 'Rank_KMeans', 'Rank_AE']
+    labels = ['Isolation Forest', 'LOF', 'K-Means', 'GNN Autoencoder']
+    
+    total_nodes = len(df_results)
+    plot_data = []
+    found_suspects = []
+    
+    for node in suspect_nodes:
+        if node in df_results['Node_ID'].values:
+            row = df_results[df_results['Node_ID'] == node].iloc[0]
+            # Scoring: (1 - Rank/Total) * 100. Rank 1 becomes ~100% score.
+            node_scores = [(1 - (row[m] / total_nodes)) * 100 for m in rank_metrics]
+            plot_data.append(node_scores)
+            found_suspects.append(node)
+
+    if not plot_data:
+        return
+
+    angles = np.linspace(0, 2*np.pi, len(rank_metrics), endpoint=False).tolist()
+    angles += angles[:1]
+
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+    
+    for i, scores in enumerate(plot_data):
+        values = scores + scores[:1]
+        ax.plot(angles, values, color=colors[i % len(colors)], linewidth=2, label=f"Node {found_suspects[i]}")
+        ax.fill(angles, values, color=colors[i % len(colors)], alpha=0.1)
+
+    # Casting to clear IDE warnings if needed, though dict(polar=True) works at runtime
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, fontweight='bold')
+    
+    plt.ylim(0, 100)
+    ax.set_yticklabels(["Low Risk", "20%", "40%", "60%", "80%", "High Risk"], color="gray", size=9)
+    plt.title("Business Suspects: Model Consensus Profile", size=15, pad=30, fontweight='bold')
+    plt.legend(loc='upper right', bbox_to_anchor=(1.2, 1.1))
+    
+    plt.savefig(plot_dir / "business_suspects_radar_comparison.png", dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Model Ranking Radar saved to: {plot_dir / 'business_suspects_radar_comparison.png'}")
