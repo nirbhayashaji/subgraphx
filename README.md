@@ -31,8 +31,10 @@ The pipeline operates in three distinct phases: Feature Engineering, Anomaly Det
 
 Usage
 
-To run the full end-to-end pipeline and enter Interactive Investigation Mode: python main.py
-To bypass ML training and generate explainability dashboards for known suspects directly: python phase_2_anomaly_detection/explainer_logic.py
+To run the full end-to-end pipeline and enter Interactive Investigation Mode: 
+python main.py
+To bypass ML training and generate explainability dashboards for known suspects directly: 
+python phase_2_anomaly_detection/explainer_logic.py
 
 
 ---
