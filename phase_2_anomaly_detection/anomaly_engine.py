@@ -26,8 +26,9 @@ def run_anomaly_ensemble(data_path: Path | str, output_path: Path | str, target_
     iso.fit(X_scaled)
     results_df['Score_IF'] = -iso.decision_function(X_scaled) 
 
-    # LOF fixed to k=20 to capture isolated, tight-knit criminal cliques
-    lof = LocalOutlierFactor(n_neighbors=20, contamination=0.01)
+    # Increased k to 500 to see past duplicate feature clusters in a 160k+ node network.
+    # Added n_jobs=-1 to use all CPU cores and speed up the calculation.
+    lof = LocalOutlierFactor(n_neighbors=500, contamination=0.01, n_jobs=-1)
     lof.fit_predict(X_scaled)
     results_df['Score_LOF'] = -lof.negative_outlier_factor_
 

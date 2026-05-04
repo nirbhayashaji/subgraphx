@@ -57,6 +57,7 @@ def explain_and_visualize(target_node: str):
     BASE_DIR = Path(__file__).resolve().parent.parent
     INPUT_CSV = BASE_DIR / "data" / "raw_network_transactions.csv"
     FEATURES_CSV = BASE_DIR / "results" / "master_node_features.csv"
+    RESULTS_CSV = BASE_DIR / "results" / "anomaly_ensemble_results.csv" # <-- Added this
     MODEL_PATH = BASE_DIR / "models" / "anomaly_ae_model.pth"
     SCALER_PATH = BASE_DIR / "models" / "scaler.joblib"
     PLOT_DIR = BASE_DIR / "results" / "plots"
@@ -64,6 +65,8 @@ def explain_and_visualize(target_node: str):
     df_raw = load_and_clean_data(str(INPUT_CSV))
     G = build_transfer_network(df_raw)
     metrics_df = pd.read_csv(FEATURES_CSV, dtype={'Node_ID': str}, low_memory=False)
+    df_results = pd.read_csv(RESULTS_CSV, dtype={'Node_ID': str}, low_memory=False) # <-- Added this
+
     features = [col for col in metrics_df.columns if col != 'Node_ID']
 
     node_to_idx = {node_id: idx for idx, node_id in enumerate(metrics_df['Node_ID'])}
@@ -82,7 +85,9 @@ def explain_and_visualize(target_node: str):
     
     guilty_nodes = list(influential_nodes.keys()) + [target_node]
     crime_scene = G.subgraph(guilty_nodes)
-    draw_shapley_evidence_map(target_node, crime_scene, influential_nodes, PLOT_DIR)
+    
+    # <-- Corrected function call to pass the DataFrames
+    draw_shapley_evidence_map(target_node, crime_scene, influential_nodes, df_results, metrics_df, PLOT_DIR)
 
 def print_node_profile(node_id: str, base_dir: Path):
     results_csv = base_dir / "results" / "anomaly_ensemble_results.csv"
