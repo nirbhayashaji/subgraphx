@@ -39,7 +39,6 @@ To bypass ML training and generate explainability dashboards for known suspects 
 
 ### 2. Slide Deck Outline: "Understanding the Architecture"
 
-If you need to present this repository to your supervisor or a technical team, here is a 4-slide narrative structure that perfectly summarizes the codebase.
 
 #### **Slide 1: Pipeline Overview & Objectives**
 *   **Headline:** Moving from Black-Box to Forensic Explainability
